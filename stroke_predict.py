@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import mean, col, when, lit
 from pyspark.ml import Pipeline
-from pyspark.ml.classification import LogisticRegression, NaiveBayes, LinearSVC, DecisionTreeClassifier
+from pyspark.ml.classification import LogisticRegression, NaiveBayes, LinearSVC, DecisionTreeClassifier, RandomForestClassifier
 from pyspark.ml.tuning import ParamGridBuilder, CrossValidator
 from pyspark.ml.feature import VectorAssembler, OneHotEncoder, StringIndexer
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
@@ -11,8 +11,11 @@ import numpy as np
 
 
 # postavlja konfiguraciju SparkSession objekta za lokalni način rada (1 komp)
-spark = SparkSession.builder.master("local").appName(
-    "StrokePrediction").getOrCreate()
+spark = SparkSession.builder \
+    .master("local") \
+    .appName("StrokePrediction") \
+    .config("spark.driver.memory", "8g") \
+    .getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 dataset_df = spark.read.csv(
     'healthcare-dataset-stroke-data.csv', inferSchema=True, header=True)
@@ -29,12 +32,15 @@ dataset_df = dataset_df.drop('id')  # izbacuje se id
 
 mean_bmi = dataset_df.select(mean(col('bmi'))).first()[
     0]  # uzimam srednju vrednost bmi iz kolone
+
 dataset_df = dataset_df.withColumn('bmi', when(
     col('bmi') == "N/A", mean_bmi).otherwise(col('bmi')))  # menjaj svuda gde je "N/A"
+
 dataset_df = dataset_df.withColumn("bmi", dataset_df["bmi"].cast(
     "double"))  # bmi je bio string sad je double
 
 dataset_df.show(15)
+
 # izdvoji kolone sa string tipom podataka
 string_columns = [col for col, dtype in dataset_df.dtypes if dtype == 'string']
 encoded_cols = list()
@@ -51,7 +57,7 @@ for column in string_columns:
 # Create a Pipeline with the stages, ovo je s chatgpt jer moj kod nije hteo da radi bez pipeline :DDDDDD
 pipeline = Pipeline(stages=stages)
 
-# Fit and transform the pipeline on the DataFrame (ovde transform oce da radi :DDDDDDDDDDDDDDD)
+# Fit and transform the pipeline on the DataFrame (gle ovde transform oce da radi :DDDDDDDDDDDDDDD)
 encoded_df = pipeline.fit(dataset_df).transform(dataset_df)
 encoded_df.show(10)
 
@@ -97,7 +103,7 @@ dataset_df.show(10)
 
 # kako se čita (2, [1], [1.0]): 2 je dužina vektora, 1 označava indeks gde postoji nenulta vrednost (svi ostali indeksi su 0), 1.0 je ta vrednost na indeksu 1
 
-# jubilarna stota linija koda da se počne s treniranjem modela
+# jubilarna linija koda da se počne s treniranjem modela
 # definišu se svi atributi koji ulaze u klasifikaciju
 feature_columns = ["gender", "age", "hypertension", "heart_disease", "ever_married",
                    "work_type", "Residence_type", "avg_glucose_level", "bmi",
@@ -107,62 +113,100 @@ feature_columns = ["gender", "age", "hypertension", "heart_disease", "ever_marri
 assembler = VectorAssembler(inputCols=feature_columns, outputCol="features")
 dataset_df = assembler.transform(encoded_df)
 
-train_data, test_data = dataset_df.randomSplit([0.7, 0.3], seed=42)
+# pravi se lista gde se instanciraju modeli (ovde mogu i svi ostali koji će da se koriste)
+classifiers = [
+    LogisticRegression(featuresCol="features", labelCol="stroke"),
+    NaiveBayes(featuresCol="features", labelCol="stroke"),
+    LinearSVC(featuresCol="features", labelCol="stroke"),
+    DecisionTreeClassifier(featuresCol="features", labelCol="stroke"),
+    RandomForestClassifier(featuresCol="features", labelCol="stroke")
+]
 
-# instancira se Logistic Regression model (ovde mogu i svi ostali koji će da se koriste)
-lr = LogisticRegression(featuresCol="features", labelCol="stroke")
-# nb = NaiveBayes(featuresCol="features", labelCol="stroke")
-# svm = LinearSVC(maxIter=10)
-# dt = DecisionTreeClassifier()
+for classifier in classifiers:
+    print(
+        f'Klasifikator {classifier.__class__.__name__} s 30:70 test:trening podelom podataka:')
 
-model = lr.fit(train_data)  # model se pravi na osnovu trening podataka
-predictions = model.transform(test_data)  # prave se predikcije s test podacima
-predictions.show()
+    train_data, test_data = dataset_df.randomSplit([0.7, 0.3], seed=42)
 
-predicted_strokes = np.array(predictions.select(
-    "prediction").rdd.flatMap(lambda x: x).collect())
-actual_strokes = np.array(predictions.select(
-    "stroke").rdd.flatMap(lambda x: x).collect())
+    # model se pravi na osnovu trening podataka
+    model = classifier.fit(train_data)
+    # prave se predikcije s test podacima
+    predictions = model.transform(test_data)
 
-# select izdvaja samo kolonu "prediction", rdd pretvara u RDD,, flatMap(lambda x: x) pretvara u 1D. collect() se koristi za prikupljanje svih elemenata RDD-a i njihovo smeštanje u listu
-# pretvara se u numpy array da se lakshe barata
+    predicted_strokes = np.array(predictions.select(
+        "prediction").rdd.flatMap(lambda x: x).collect())  # predikcije
+    
+    actual_strokes = np.array(predictions.select("stroke").rdd.flatMap(
+        lambda x: x).collect())  # ekšual stronks (desilo se)
 
-print("Evaluacija Logistic Regression klasifikatora za 30:70 test:trening podelu podataka:")
-print(classification_report(actual_strokes, predicted_strokes))
-print("Matrica konfuzije:")
-print(confusion_matrix(actual_strokes, predicted_strokes))
+    print(
+        f'Evaluacija {classifier.__class__.__name__} klasifikatora za 30:70 test:trening podelu podataka:')
+    print(classification_report(actual_strokes, predicted_strokes))
+    print("Matrica konfuzije:")
+    print(confusion_matrix(actual_strokes, predicted_strokes))
 
-evaluator = BinaryClassificationEvaluator(labelCol="stroke")
-auc = evaluator.evaluate(predictions)
-print("Površina ispod ROC krive (AUC):", auc)
+    evaluator = BinaryClassificationEvaluator(labelCol="stroke")
+    auc = evaluator.evaluate(predictions)
+    print("Površina ispod ROC krive (AUC):", auc)
+    print("------------------------------------")
 
 
-# Ovde se pomocu grida testiraju najbolji parametri za LogReg klasifikator, regParam kontroliše jačinu regularizacije(manje vrednosti regParam smanjuju regularizaciju, dok veće vrednosti je pojačavaju)
-paramGrid = ParamGridBuilder() \
-    .addGrid(lr.regParam, [0.01, 0.1, 1.0]) \
-    .addGrid(lr.maxIter, [10, 20, 30]) \
-    .build()
+for classifier in classifiers:
+    print(f'Klasifikator {classifier.__class__.__name__} sa cross-validation:')
 
-crossval = CrossValidator(estimator=lr,
-                          estimatorParamMaps=paramGrid,
-                          evaluator=BinaryClassificationEvaluator(
-                              labelCol="stroke"),
-                          numFolds=5)
+# Ovde se pomocu grida testiraju najbolji parametri za konkretni klasifikator, ima raznih
 
-cv_model = crossval.fit(dataset_df)  # kreira model
-best_model = cv_model.bestModel  # uzima najbolji
-predictions = best_model.transform(dataset_df)
+    # smoothing se koristi kako bi se izbeglo da model dodeli nultu verovatnoću nekom atributu koji se nije pojavio u trening skupu podataka
+    if isinstance(classifier, NaiveBayes):
+        paramGrid = ParamGridBuilder() \
+            .addGrid(classifier.smoothing, [0.1, 0.5, 1.0]) \
+            .build()
+        
+    elif isinstance(classifier, DecisionTreeClassifier):
+        # MaxDepth je maksimalna dubina stabla koju dozvoljava Decision Tree algoritam
+        # MaxBins predstavlja maksimalni broj binova koji će se koristiti prilikom diskretizacije numeričkih atributa u Decision Tree algoritmu
+        paramGrid = ParamGridBuilder() \
+            .addGrid(classifier.maxDepth, [2, 5, 10]) \
+            .addGrid(classifier.maxBins, [10, 20, 30]) \
+            .build()
 
-predicted_strokes = np.array(predictions.select(
-    "prediction").rdd.flatMap(lambda x: x).collect())
-actual_strokes = np.array(predictions.select(
-    "stroke").rdd.flatMap(lambda x: x).collect())
+    elif isinstance(classifier, RandomForestClassifier):
+        # NumTrees je broj stabala koji će biti konstruisani u Random Forest algoritmu
+        paramGrid = ParamGridBuilder() \
+            .addGrid(classifier.numTrees, [50, 100, 150]) \
+            .addGrid(classifier.maxDepth, [2, 5, 10]) \
+            .build()
+    else:
+        # regParam kontroliše jačinu regularizacije (manje vrednosti regParam smanjuju regularizaciju, dok veće vrednosti je pojačavaju), što znači da smanjuje overfitting
+        # MaxIter je maksimalni broj iteracija koje će alg. izvršiti prilikom učenja modela
+        paramGrid = ParamGridBuilder() \
+            .addGrid(classifier.regParam, [0.01, 0.1, 1.0]) \
+            .addGrid(classifier.maxIter, [10, 20, 30]) \
+            .build()
 
-print("Evaluacija Logistic Regression klasifikatora za cross-validation podelu podataka:")
-print(classification_report(actual_strokes, predicted_strokes))
-print("Matrica konfuzije:")
-print(confusion_matrix(actual_strokes, predicted_strokes))
+    crossval = CrossValidator(estimator=classifier,
+                              estimatorParamMaps=paramGrid,
+                              evaluator=BinaryClassificationEvaluator(
+                                  labelCol="stroke"),
+                              numFolds=5)
 
-evaluator = BinaryClassificationEvaluator(labelCol="stroke")
-auc = evaluator.evaluate(predictions)
-print("Površina ispod ROC krive (AUC):", auc)
+    cv_model = crossval.fit(dataset_df)  # kreira model
+    best_model = cv_model.bestModel  # uzima najbolji
+    predictions = best_model.transform(dataset_df)
+
+    predicted_strokes = np.array(predictions.select(
+        "prediction").rdd.flatMap(lambda x: x).collect())  # predikcije
+    
+    actual_strokes = np.array(predictions.select("stroke").rdd.flatMap(
+        lambda x: x).collect())  # desilose
+
+    print(
+        f'Evaluacija {classifier.__class__.__name__} klasifikatora za cross-validation podelu podataka:')
+    print(classification_report(actual_strokes, predicted_strokes))
+    print("Matrica konfuzije:")
+    print(confusion_matrix(actual_strokes, predicted_strokes))
+
+    evaluator = BinaryClassificationEvaluator(labelCol="stroke")
+    auc = evaluator.evaluate(predictions)
+    print("Površina ispod ROC krive (AUC):", auc)
+    print("------------------------------------")
