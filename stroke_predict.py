@@ -7,6 +7,7 @@ from pyspark.ml.feature import VectorAssembler, OneHotEncoder, StringIndexer
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.mllib.evaluation import MulticlassMetrics
 from sklearn.metrics import classification_report, confusion_matrix
+from smote_sampling import vectorizerFunction, SmoteSampling
 import numpy as np
 
 
@@ -100,7 +101,13 @@ dataset_df.show(10)
 # urban 0.0
 # rural 1.0
 
+# vectorized = vectorizerFunction(dataset_df, 'stroke')
 
+# # Apply SMOTE sampling
+
+# new_data = SmoteSampling(vectorized, k=2, minorityClass=1, majorityClass=0, percentageOver=100, percentageUnder=5)
+
+# dataset_df=new_data
 # kako se čita (2, [1], [1.0]): 2 je dužina vektora, 1 označava indeks gde postoji nenulta vrednost (svi ostali indeksi su 0), 1.0 je ta vrednost na indeksu 1
 
 # jubilarna linija koda da se počne s treniranjem modela
@@ -141,7 +148,7 @@ for classifier in classifiers:
 
     print(
         f'Evaluacija {classifier.__class__.__name__} klasifikatora za 30:70 test:trening podelu podataka:')
-    print(classification_report(actual_strokes, predicted_strokes))
+    print(classification_report(actual_strokes, predicted_strokes, zero_division=1))
     print("Matrica konfuzije:")
     print(confusion_matrix(actual_strokes, predicted_strokes))
 
@@ -202,7 +209,7 @@ for classifier in classifiers:
 
     print(
         f'Evaluacija {classifier.__class__.__name__} klasifikatora za cross-validation podelu podataka:')
-    print(classification_report(actual_strokes, predicted_strokes))
+    print(classification_report(actual_strokes, predicted_strokes, zero_division=1))
     print("Matrica konfuzije:")
     print(confusion_matrix(actual_strokes, predicted_strokes))
 
