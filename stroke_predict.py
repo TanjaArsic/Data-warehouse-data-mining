@@ -8,6 +8,7 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.mllib.evaluation import MulticlassMetrics
 from sklearn.metrics import classification_report, confusion_matrix
 from smote_sampling import vectorizerFunction, SmoteSampling
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -26,7 +27,18 @@ dataset_df.describe().show(2)  # sveukupna statistika, prva 2 reda
 
 # željene kategoričke vrednosti prikazuje, gleda se u ovom slučaju po vrednostima stroke kolko ih ima, tj kolko njih ima i kolko njih nema šlog
 dataset_df.groupby("stroke").count().show()
-# nebalansiran set podataka
+data = dataset_df.groupby("stroke").count().collect()
+
+labels = ["No Stroke" if row['stroke'] == 0 else "Stroke" for row in data]
+counts = [row['count'] for row in data]
+
+plt.bar(labels, counts)
+
+plt.xlabel('Stroke')
+plt.ylabel('Count')
+plt.title('Stroke Data')
+
+plt.show() # nebalansiran set podataka
 
 # Sredjuju se podaci
 dataset_df = dataset_df.drop('id')  # izbacuje se id
