@@ -16,11 +16,11 @@ import numpy as np
 spark = SparkSession.builder \
     .master("local") \
     .appName("StrokePrediction") \
-    .config("spark.driver.memory", "8g") \
+    .config("spark.driver.memory", "4g") \
     .getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 dataset_df = spark.read.csv(
-    'healthcare-dataset-stroke-data.csv', inferSchema=True, header=True)
+    'hes_a_SMOTE_operator.csv', inferSchema=True, header=True)
 
 dataset_df.printSchema()
 dataset_df.describe().show(2)  # sveukupna statistika, prva 2 reda
@@ -133,11 +133,15 @@ assembler = VectorAssembler(inputCols=feature_columns, outputCol="features")
 dataset_df = assembler.transform(encoded_df)
 
 # pravi se lista gde se instanciraju modeli (ovde mogu i svi ostali koji će da se koriste)
+# classifiers = [
+#     LogisticRegression(featuresCol="features", labelCol="stroke"),
+#     NaiveBayes(featuresCol="features", labelCol="stroke"),
+#     LinearSVC(featuresCol="features", labelCol="stroke"),
+#     DecisionTreeClassifier(featuresCol="features", labelCol="stroke"),
+#     RandomForestClassifier(featuresCol="features", labelCol="stroke")
+# ]
+
 classifiers = [
-    LogisticRegression(featuresCol="features", labelCol="stroke"),
-    NaiveBayes(featuresCol="features", labelCol="stroke"),
-    LinearSVC(featuresCol="features", labelCol="stroke"),
-    DecisionTreeClassifier(featuresCol="features", labelCol="stroke"),
     RandomForestClassifier(featuresCol="features", labelCol="stroke")
 ]
 
